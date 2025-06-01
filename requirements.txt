@@ -5,8 +5,6 @@ termcolor
 addict
 yapf==0.40.1
 timm
-torch
-torchvision
 transformers
 numpy
 opencv-python
