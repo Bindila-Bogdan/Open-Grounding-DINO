@@ -1,0 +1,16 @@
+{
+  "train": [
+    {
+      "root": "data/train/",
+      "anno": "data/train/train_annotations.jsonl",
+      "dataset_mode": "odvg"
+    }
+  ],
+  "val": [
+    {
+      "root": "data/val/",
+      "anno": "data/val/val_annotations.jsonl",
+      "dataset_mode": "odvg"
+    }
+  ]
+}
