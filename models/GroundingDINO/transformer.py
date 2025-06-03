@@ -558,6 +558,7 @@ class TransformerEncoder(nn.Module):
                         memory_text,
                         key_padding_mask,
                         text_attention_mask,
+                        use_reentrant=False,
                     )
                 else:
                     output, memory_text = self.fusion_layers[layer_id](
@@ -585,6 +586,7 @@ class TransformerEncoder(nn.Module):
                     spatial_shapes,
                     level_start_index,
                     key_padding_mask,
+                    use_reentrant=False,
                 )
             else:
                 output = layer(
@@ -867,7 +869,7 @@ class DeformableTransformerDecoderLayer(nn.Module):
         return tensor if pos is None else tensor + pos
 
     def forward_ffn(self, tgt):
-        with torch.cuda.amp.autocast(enabled=False):
+        with torch.amp.autocast("cuda", enabled=False):
             tgt2 = self.linear2(self.dropout3(self.activation(self.linear1(tgt))))
         tgt = tgt + self.dropout4(tgt2)
         tgt = self.norm3(tgt)

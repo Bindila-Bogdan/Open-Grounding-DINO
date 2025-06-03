@@ -5,6 +5,7 @@ import datetime
 import json
 import random
 import time
+import warnings
 from pathlib import Path
 import os, sys
 import numpy as np
@@ -23,6 +24,8 @@ from engine import evaluate, train_one_epoch
 
 from groundingdino.util.utils import clean_state_dict
 
+warnings.simplefilter(action='ignore', category=FutureWarning)
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
@@ -170,7 +173,7 @@ def main(args):
     optimizer = torch.optim.AdamW(param_dicts, lr=args.lr,
                                   weight_decay=args.weight_decay)
 
-    logger.debug("build dataset ... ...")
+    logger.debug("build dataset ... ...") 
     if not args.eval:
         num_of_dataset_train = len(dataset_meta["train"])
         if num_of_dataset_train == 1:
@@ -215,7 +218,7 @@ def main(args):
     base_ds = get_coco_api_from_dataset(dataset_val)
 
     if args.frozen_weights is not None:
-        checkpoint = torch.load(args.frozen_weights, map_location='cpu')
+        checkpoint = torch.load(args.frozen_weights, map_location='cpu', weights_only=False)
         model_without_ddp.detr.load_state_dict(clean_state_dict(checkpoint['model']),strict=False)
 
     output_dir = Path(args.output_dir)
@@ -226,7 +229,7 @@ def main(args):
             checkpoint = torch.hub.load_state_dict_from_url(
                 args.resume, map_location='cpu', check_hash=True)
         else:
-            checkpoint = torch.load(args.resume, map_location='cpu')
+            checkpoint = torch.load(args.resume, map_location='cpu', weights_only=False)
         model_without_ddp.load_state_dict(clean_state_dict(checkpoint['model']),strict=False)
 
 
@@ -237,7 +240,7 @@ def main(args):
             args.start_epoch = checkpoint['epoch'] + 1
 
     if (not args.resume) and args.pretrain_model_path:
-        checkpoint = torch.load(args.pretrain_model_path, map_location='cpu')['model']
+        checkpoint = torch.load(args.pretrain_model_path, map_location='cpu', weights_only=False)['model']
         from collections import OrderedDict
         _ignorekeywordlist = args.finetune_ignore if args.finetune_ignore else []
         ignorelist = []
@@ -353,7 +356,7 @@ def main(args):
                                    output_dir / "eval" / name)
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    print('Training time {}'.format(total_time_str))
+    print('Training time {}\n'.format(total_time_str))
 
     # remove the copied files.
     copyfilelist = vars(args).get('copyfilelist')
