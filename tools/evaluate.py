@@ -12,7 +12,22 @@ from groundingdino.util import box_ops
 from groundingdino.util.slconfig import SLConfig
 from groundingdino.util.utils import clean_state_dict, get_phrases_from_posmap
 from groundingdino.util.vl_utils import create_positive_map_from_span
+from torchmetrics.detection import MeanAveragePrecision
 
+
+def get_box_coordinates(H, W, boxes, device):
+    updated_boxes = []
+
+    for box in boxes:
+        # from 0..1 to 0..W, 0..H
+        box = box * torch.Tensor([W, H, W, H])
+        # from xywh to xyxy
+        box[:2] -= box[2:] / 2
+        box[2:] += box[:2]
+        updated_boxes.append(box)
+        
+    return updated_boxes
+        
 
 def plot_boxes_to_image(image_pil, tgt):
     H, W = tgt["size"]
@@ -156,7 +171,29 @@ def load_annotations(annotations_path):
                 painting_annotations.append(json.loads(stripped_line))  
                 
     return painting_annotations
+
+
+def compute_mean_average_precision(predictions, targets, device):
+    metric = MeanAveragePrecision(box_format="xyxy", iou_type="bbox", class_metrics=True).to(device)
+
+    metric.update(predictions, targets)
+    metrics = metric.compute()
+
+    map_50 = float(metrics["map_50"])
+    map_50_95 = float(metrics["map"])
     
+    print(f"mAP@50: {map_50}")
+    print(f"mAP@50-95: {map_50_95}")
+
+    # if performance per class is available, show it
+    try:
+        print(f"mAP per class: {metrics['map_per_class']}")
+        print(f"classes: {metrics['classes']}")
+    except:
+        pass
+
+    return map_50, map_50_95
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Grounding DINO example", add_help=True)
@@ -177,11 +214,26 @@ if __name__ == "__main__":
     text_threshold = args.text_threshold
     token_spans = None
     cpu_only = args.cpu_only
+    
+    if not cpu_only:
+        device = "cuda"
+    else:
+        device = "cpu"
 
     # load model
     model = load_model(config_file, checkpoint_path, cpu_only=cpu_only)
     
+    
+    all_predicted_bboxes = []
+    all_ground_truth_bboxes = []
+    
     painting_annotations = load_annotations(args.annotations_file)
+    
+    unique_annotations = set()
+    for painting_annotation in painting_annotations:
+        unique_annotations.update(painting_annotation["grounding"]["caption"][:-2].split(" . "))
+        
+    labels_to_ids = dict(zip(unique_annotations, list(range(len(unique_annotations)))))
    
     for painting_annotation in painting_annotations[:5]:
         image_name = painting_annotation["filename"]
@@ -191,7 +243,7 @@ if __name__ == "__main__":
         image_pil, image = load_image(images_dir + image_name)
     
         # visualize raw image
-        image_pil.save(os.path.join(f"./{image_name}"))
+        # image_pil.save(os.path.join(f"./{image_name}"))
 
         # run model
         boxes_filt, pred_phrases = get_grounding_output(
@@ -200,11 +252,49 @@ if __name__ == "__main__":
 
         # visualize pred
         size = image_pil.size
-        pred_dict = {
-            "boxes": boxes_filt,
+        pred = {
+            "boxes": torch.stack(get_box_coordinates(size[1], size[0], boxes_filt, device)),
             "size": [size[1], size[0]],
             "labels": pred_phrases,
         }
-        print(pred_dict)
-        image_with_box = plot_boxes_to_image(image_pil, pred_dict)[0]
-        image_with_box.save(f"./pred_{image_name}")
+        
+        predicted_bboxes = {
+            "boxes": pred["boxes"],
+            "scores": torch.tensor([float(label.split("(")[1][:-1]) for label in pred["labels"]], device=device),
+            "labels": torch.tensor(
+                [
+                    labels_to_ids[label] if label in labels_to_ids.keys() else max(labels_to_ids.values()) + 1
+                    for label in [label.split("(")[0] for label in pred["labels"]]
+                ],
+                device=device
+            ),
+        }       
+
+        if len(painting_annotation["grounding"]["regions"]) != 0:
+            target_bboxes = {
+                "boxes": torch.tensor(
+                    [annotation["bbox"] for annotation in painting_annotation["grounding"]["regions"]],
+                    device=device
+                ),
+                "labels": torch.tensor(
+                    [
+                        labels_to_ids[label] if label in labels_to_ids.keys() else max(labels_to_ids.values()) + 1
+                        for label in [annotation["phrase"] for annotation in painting_annotation["grounding"]["regions"]]
+                    ],
+                    device=device
+                ),
+            }
+        else:
+            # treat the case when for an image there's no ground truth
+            target_bboxes = {
+                "boxes": torch.empty((0, 4)).to(device),
+                "labels": torch.empty((0,), dtype=torch.int64).to(device),
+            }
+        
+        all_predicted_bboxes.append(predicted_bboxes)
+        all_ground_truth_bboxes.append(target_bboxes)    
+    
+        image_with_box = plot_boxes_to_image(image_pil, pred)[0]
+        # image_with_box.save(f"./pred_{image_name}")
+        
+    map_50, map_50_95 = compute_mean_average_precision(all_predicted_bboxes, all_ground_truth_bboxes, device)
