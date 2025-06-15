@@ -6,6 +6,7 @@ import json
 import random
 import time
 import warnings
+import subprocess
 from pathlib import Path
 import os, sys
 import numpy as np
@@ -86,8 +87,6 @@ def build_model_main(args):
 
 
 def main(args):
-    
-
     utils.setup_distributed(args)
     # load cfg file and update the args
     print("Loading config file from {}".format(args.config_file))
@@ -257,25 +256,24 @@ def main(args):
 
         _load_output = model_without_ddp.load_state_dict(_tmp_st, strict=False)
         logger.info(str(_load_output))
-
- 
     
     if args.eval:
         os.environ['EVAL_FLAG'] = 'TRUE'
-        test_stats, coco_evaluator = evaluate(model, criterion, postprocessors,
-                                              data_loader_val, base_ds, device, args.output_dir, wo_class_error=wo_class_error, args=args)
-        if args.output_dir:
-            utils.save_on_master(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
 
-        log_stats = {**{f'test_{k}': v for k, v in test_stats.items()} }
-        if args.output_dir and utils.is_main_process():
-            with (output_dir / "log.txt").open("a") as f:
-                f.write(json.dumps(log_stats) + "\n")
+        if utils.is_main_process():
+            command = [
+                "/usr/bin/python", "./tools/evaluate.py",
+                "-c", args.config_file,
+                "-p", args.pretrain_model_path,
+                "-a", dataset_meta["val"][0]["anno"],
+                "-d", dataset_meta["val"][0]["root"],
+                "-l", args.output_dir,
+                "-t"
+                ]
+            subprocess.run(command)
 
         return
-    
- 
-    
+        
     print("Start training")
     start_time = time.time()
     best_map_holder = BestMetricHolder(use_ema=False)
@@ -290,7 +288,7 @@ def main(args):
             args.clip_max_norm, wo_class_error=wo_class_error, lr_scheduler=lr_scheduler, args=args, logger=(logger if args.save_log else None))
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
-
+        
         if not args.onecyclelr:
             lr_scheduler.step()
         if args.output_dir:
@@ -309,51 +307,59 @@ def main(args):
 
                 utils.save_on_master(weights, checkpoint_path)
                 
-        # eval
-        test_stats, coco_evaluator = evaluate(
-            model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir,
-            wo_class_error=wo_class_error, args=args, logger=(logger if args.save_log else None)
-        )
-        map_regular = test_stats['coco_eval_bbox'][0]
-        _isbest = best_map_holder.update(map_regular, epoch, is_ema=False)
-        if _isbest:
-            checkpoint_path = output_dir / 'checkpoint_best_regular.pth'
-            utils.save_on_master({
-                'model': model_without_ddp.state_dict(),
-                'optimizer': optimizer.state_dict(),
-                'lr_scheduler': lr_scheduler.state_dict(),
-                'epoch': epoch,
-                'args': args,
-            }, checkpoint_path)
-        log_stats = {
-            **{f'train_{k}': v for k, v in train_stats.items()},
-            **{f'test_{k}': v for k, v in test_stats.items()},
-        }
+        # eval       
+        if utils.is_main_process():
+            command = [
+                "/usr/bin/python", "./tools/evaluate.py",
+                "-c", args.config_file,
+                "-p", f"{output_dir}/checkpoint{epoch:04}.pth",
+                "-a", dataset_meta["val"][0]["anno"],
+                "-d", dataset_meta["val"][0]["root"],
+                "-l", args.output_dir
+                ]
+            subprocess.run(command)
+            
+            with open(f"{args.output_dir}/intermediate_evaluation.json", 'r') as f:
+                test_stats = json.load(f)
+                map_regular = test_stats["test_map_50"]
+            
+            _isbest = best_map_holder.update(map_regular, epoch, is_ema=False)
 
+            if _isbest:
+                checkpoint_path = output_dir / 'checkpoint_best_regular.pth'
+                utils.save_on_master({
+                    'model': model_without_ddp.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    'lr_scheduler': lr_scheduler.state_dict(),
+                    'epoch': epoch,
+                    'args': args,
+                }, checkpoint_path)
 
-        try:
-            log_stats.update({'now_time': str(datetime.datetime.now())})
-        except:
-            pass
-        
-        epoch_time = time.time() - epoch_start_time
-        epoch_time_str = str(datetime.timedelta(seconds=int(epoch_time)))
-        log_stats['epoch_time'] = epoch_time_str
+            log_stats = {
+                **{f'train_{k}': v for k, v in train_stats.items()},
+                **{f'test_{k}': v for k, v in test_stats.items()},
+            }
 
-        if args.output_dir and utils.is_main_process():
-            with (output_dir / "log.txt").open("a") as f:
-                f.write(json.dumps(log_stats) + "\n")
+            try:
+                log_stats.update({'now_time': str(datetime.datetime.now())})
+            except:
+                pass
 
-            # for evaluation logs
-            if coco_evaluator is not None:
-                (output_dir / 'eval').mkdir(exist_ok=True)
-                if "bbox" in coco_evaluator.coco_eval:
-                    filenames = ['latest.pth']
-                    if epoch % 50 == 0:
-                        filenames.append(f'{epoch:03}.pth')
-                    for name in filenames:
-                        torch.save(coco_evaluator.coco_eval["bbox"].eval,
-                                   output_dir / "eval" / name)
+            epoch_time = time.time() - epoch_start_time
+            epoch_time_str = str(datetime.timedelta(seconds=int(epoch_time)))
+            log_stats['epoch_time'] = epoch_time_str
+
+            try:
+                with open(f"{output_dir}/logs.json", "r") as f:
+                    previous_logs = json.load(f)
+            except:
+                previous_logs = []
+                
+            previous_logs.append(log_stats)
+            
+            with open(f"{output_dir}/logs.json", "w") as f:       
+                json.dump(previous_logs, f, indent=4)
+
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}\n'.format(total_time_str))
@@ -365,11 +371,13 @@ def main(args):
         for filename in copyfilelist:
             print("Removing: {}".format(filename))
             remove(filename)
+    
+    os.remove(f"{args.output_dir}/intermediate_evaluation.json")
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('DETR training and evaluation script', parents=[get_args_parser()])
     args = parser.parse_args()
     if args.output_dir:
-        Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+        Path(args.output_dir).mkdir(parents=True, exist_ok=True)       
     main(args)

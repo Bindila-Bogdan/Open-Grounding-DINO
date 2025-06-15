@@ -91,7 +91,6 @@ def load_model(model_config_path, model_checkpoint_path, cpu_only=False):
     model = build_model(args)
     checkpoint = torch.load(model_checkpoint_path, map_location="cpu", weights_only=False)
     load_res = model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
-    print(load_res)
     _ = model.eval()
     return model
 
@@ -157,7 +156,6 @@ def get_grounding_output(model, image, caption, box_threshold, text_threshold=No
         boxes_filt = torch.cat(all_boxes, dim=0).cpu()
         pred_phrases = all_phrases
 
-
     return boxes_filt, pred_phrases
 
 
@@ -173,7 +171,55 @@ def load_annotations(annotations_path):
     return painting_annotations
 
 
-def compute_mean_average_precision(predictions, targets, device):
+def get_labels_to_ids(painting_annotations):
+    unique_annotations = set()
+    
+    for painting_annotation in painting_annotations:
+        unique_annotations.update(painting_annotation["grounding"]["caption"][:-2].split(" . "))
+        
+    labels_to_ids = dict(zip(unique_annotations, list(range(len(unique_annotations)))))    
+    
+    return labels_to_ids
+
+
+def get_bounding_boxes(painting_annotation, pred, size, boxes_filt, labels_to_ids, device):
+    predicted_bboxes = {
+        "boxes": torch.stack(get_box_coordinates(size[1], size[0], boxes_filt, device)),
+        "scores": torch.tensor([float(label.split("(")[1][:-1]) for label in pred["labels"]], device=device),
+        "labels": torch.tensor(
+            [
+                labels_to_ids[label] if label in labels_to_ids.keys() else max(labels_to_ids.values()) + 1
+                for label in [label.split("(")[0] for label in pred["labels"]]
+            ],
+            device=device
+        ),
+    }       
+
+    if len(painting_annotation["grounding"]["regions"]) != 0:
+        target_bboxes = {
+            "boxes": torch.tensor(
+                [annotation["bbox"] for annotation in painting_annotation["grounding"]["regions"]],
+                device=device
+            ),
+            "labels": torch.tensor(
+                [
+                    labels_to_ids[label] if label in labels_to_ids.keys() else max(labels_to_ids.values()) + 1
+                    for label in [annotation["phrase"] for annotation in painting_annotation["grounding"]["regions"]]
+                ],
+                device=device
+            ),
+        }
+    else:
+        # treat the case when for an image there's no ground truth
+        target_bboxes = {
+            "boxes": torch.empty((0, 4)).to(device),
+            "labels": torch.empty((0,), dtype=torch.int64).to(device),
+        }    
+        
+    return predicted_bboxes, target_bboxes
+    
+
+def compute_mean_average_precision(predictions, targets, device, show_map_per_class=False):
     metric = MeanAveragePrecision(box_format="xyxy", iou_type="bbox", class_metrics=True).to(device)
 
     metric.update(predictions, targets)
@@ -186,35 +232,17 @@ def compute_mean_average_precision(predictions, targets, device):
     print(f"mAP@50-95: {map_50_95}")
 
     # if performance per class is available, show it
-    try:
-        print(f"mAP per class: {metrics['map_per_class']}")
-        print(f"classes: {metrics['classes']}")
-    except:
-        pass
+    if show_map_per_class:
+        try:
+            print(f"mAP per class: {metrics['map_per_class']}")
+            print(f"classes: {metrics['classes']}")
+        except:
+            pass
 
     return map_50, map_50_95
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser("Grounding DINO example", add_help=True)
-    parser.add_argument("--config_file", "-c", type=str, required=True, help="path to config file")
-    parser.add_argument("--checkpoint_path", "-p", type=str, required=True, help="path to checkpoint file")
-    parser.add_argument("--annotations_file", "-a", type=str, required=True, help="path to the file with annotations")
-    parser.add_argument("--images_dir", "-d", type=str, required=True, help="directory where images are located")
-    parser.add_argument("--box_threshold", type=float, default=0.34, help="box threshold")
-    parser.add_argument("--text_threshold", type=float, default=0.32, help="text threshold")
-    parser.add_argument("--cpu-only", action="store_true", help="running on cpu only!, default=False")
-    args = parser.parse_args()
-
-    # cfg
-    config_file = args.config_file 
-    checkpoint_path = args.checkpoint_path
-    images_dir = args.images_dir
-    box_threshold = args.box_threshold
-    text_threshold = args.text_threshold
-    token_spans = None
-    cpu_only = args.cpu_only
-    
+def evaluate_model(config_file, checkpoint_path, annotations_file, images_dir, logging_path, test, store_annotated_images=False, box_threshold=0.34, text_threshold=0.32, cpu_only=False):    
     if not cpu_only:
         device = "cuda"
     else:
@@ -223,78 +251,75 @@ if __name__ == "__main__":
     # load model
     model = load_model(config_file, checkpoint_path, cpu_only=cpu_only)
     
-    
     all_predicted_bboxes = []
     all_ground_truth_bboxes = []
     
-    painting_annotations = load_annotations(args.annotations_file)
-    
-    unique_annotations = set()
-    for painting_annotation in painting_annotations:
-        unique_annotations.update(painting_annotation["grounding"]["caption"][:-2].split(" . "))
-        
-    labels_to_ids = dict(zip(unique_annotations, list(range(len(unique_annotations)))))
+    # load annotations
+    painting_annotations = load_annotations(annotations_file)
+    labels_to_ids = get_labels_to_ids(painting_annotations)
    
-    for painting_annotation in painting_annotations[:5]:
+    for painting_annotation in painting_annotations:
         image_name = painting_annotation["filename"]
-        text_prompt = painting_annotation["grounding"]["caption"]
+        input_labels = painting_annotation["grounding"]["caption"][:-2].split(" . ")
         
-        # load image
+        # load image and get individual labels
         image_pil, image = load_image(images_dir + image_name)
-    
-        # visualize raw image
-        # image_pil.save(os.path.join(f"./{image_name}"))
 
-        # run model
-        boxes_filt, pred_phrases = get_grounding_output(
-            model, image, text_prompt, box_threshold, text_threshold, cpu_only=cpu_only, token_spans=token_spans
-        )
-
-        # visualize pred
-        size = image_pil.size
-        pred = {
-            "boxes": torch.stack(get_box_coordinates(size[1], size[0], boxes_filt, device)),
-            "size": [size[1], size[0]],
-            "labels": pred_phrases,
-        }
+        all_boxes_filt = []
+        pred_phrases = []
         
-        predicted_bboxes = {
-            "boxes": pred["boxes"],
-            "scores": torch.tensor([float(label.split("(")[1][:-1]) for label in pred["labels"]], device=device),
-            "labels": torch.tensor(
-                [
-                    labels_to_ids[label] if label in labels_to_ids.keys() else max(labels_to_ids.values()) + 1
-                    for label in [label.split("(")[0] for label in pred["labels"]]
-                ],
-                device=device
-            ),
-        }       
+        for input_label in input_labels:
+            # run model
+            current_boxes_filt, current_pred_phrases = get_grounding_output(
+                model, image, input_label + " .", box_threshold, text_threshold, cpu_only=cpu_only, token_spans=None
+            )
+            all_boxes_filt.append(current_boxes_filt)
+            pred_phrases.extend(current_pred_phrases)
 
-        if len(painting_annotation["grounding"]["regions"]) != 0:
-            target_bboxes = {
-                "boxes": torch.tensor(
-                    [annotation["bbox"] for annotation in painting_annotation["grounding"]["regions"]],
-                    device=device
-                ),
-                "labels": torch.tensor(
-                    [
-                        labels_to_ids[label] if label in labels_to_ids.keys() else max(labels_to_ids.values()) + 1
-                        for label in [annotation["phrase"] for annotation in painting_annotation["grounding"]["regions"]]
-                    ],
-                    device=device
-                ),
-            }
-        else:
-            # treat the case when for an image there's no ground truth
-            target_bboxes = {
-                "boxes": torch.empty((0, 4)).to(device),
-                "labels": torch.empty((0,), dtype=torch.int64).to(device),
-            }
+        boxes_filt = torch.cat(all_boxes_filt, dim=0)
+            
+        # post-process bounding boxes
+        pred = {"boxes": boxes_filt, "size": [image_pil.size[1], image_pil.size[0]], "labels": pred_phrases}
+        pred_bboxes, target_bboxes = get_bounding_boxes(painting_annotation, pred, image_pil.size, boxes_filt, labels_to_ids, device)
         
-        all_predicted_bboxes.append(predicted_bboxes)
+        all_predicted_bboxes.append(pred_bboxes)
         all_ground_truth_bboxes.append(target_bboxes)    
-    
-        image_with_box = plot_boxes_to_image(image_pil, pred)[0]
-        # image_with_box.save(f"./pred_{image_name}")
+        
+        # save annotated image
+        if store_annotated_images:
+            plot_boxes_to_image(image_pil, pred)[0].save(f"./pred_{image_name}")
         
     map_50, map_50_95 = compute_mean_average_precision(all_predicted_bboxes, all_ground_truth_bboxes, device)
+    map_values = {"map_50": map_50, "map_50_95": map_50_95}
+    
+    log_stats = {**{f'test_{k}': v for k, v in map_values.items()}}
+    
+    if test:
+        file_name = "evaluation"
+        log_stats["weights"] = checkpoint_path
+    else:
+        file_name = "intermediate_evaluation"
+    
+    with open(f"{logging_path}/{file_name}.json", "w") as f:       
+        json.dump(log_stats, f, indent=4)
+    
+    return map_values
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser("Grounding DINO evaluation", add_help=True)
+    parser.add_argument("--config_file", "-c", type=str, required=True, help="path to config file")
+    parser.add_argument("--checkpoint_path", "-p", type=str, required=True, help="path to checkpoint file")
+    parser.add_argument("--annotations_file", "-a", type=str, required=True, help="path to the file with annotations")
+    parser.add_argument("--images_dir", "-d", type=str, required=True, help="directory where images are located")
+    parser.add_argument("--store_annotated_images", "-s", action="store_true", help="store annotated images, default=False")
+    parser.add_argument("--logging_path", "-l", type=str, required=True, help="path where the results to be stored")
+    parser.add_argument("--test", "-t", action="store_true", help="True if the results are obtained after training")
+    parser.add_argument("--box_threshold", type=float, default=0.34, help="box threshold")
+    parser.add_argument("--text_threshold", type=float, default=0.32, help="text threshold")
+    parser.add_argument("--cpu_only", action="store_true", help="running on cpu only!, default=False")
+    args = parser.parse_args()
+    
+    evaluate_model(args.config_file, args.checkpoint_path, args.annotations_file, args.images_dir, args.logging_path, args.test, args.store_annotated_images, args.box_threshold, args.text_threshold, args.cpu_only)
+  
+    
