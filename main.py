@@ -260,7 +260,7 @@ def main(args):
 
         if utils.is_main_process():
             command = [
-                "/usr/bin/python", "./tools/evaluate.py",
+                "/usr/bin/python", "./util/evaluate.py",
                 "-c", args.config_file,
                 "-p", args.pretrain_model_path,
                 "-a", dataset_meta["val"][0]["anno"],
@@ -308,7 +308,7 @@ def main(args):
         # eval       
         if utils.is_main_process():
             command = [
-                "/usr/bin/python", "./tools/evaluate.py",
+                "/usr/bin/python", "./util/evaluate.py",
                 "-c", args.config_file,
                 "-p", f"{output_dir}/checkpoint{epoch:04}.pth",
                 "-a", dataset_meta["val"][0]["anno"],
