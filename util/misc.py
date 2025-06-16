@@ -216,24 +216,24 @@ class MetricLogger(object):
         data_time = SmoothedValue(fmt='{avg:.4f}')
         space_fmt = ':' + str(len(str(len(iterable)))) + 'd'
         if torch.cuda.is_available():
-            log_msg = self.delimiter.join([
+            log_msg = "  ".join([
                 header,
                 '[{0' + space_fmt + '}/{1}]',
                 'eta: {eta}',
                 '{meters}',
-                'time: {time}',
+                '\ntime: {time}',
                 'data: {data}',
                 'max mem: {memory:.0f}'
-            ])
+            ]) + "\n"
         else:
-            log_msg = self.delimiter.join([
+            log_msg = "  ".join([
                 header,
                 '[{0' + space_fmt + '}/{1}]',
                 'eta: {eta}',
                 '{meters}',
-                'time: {time}',
+                '\ntime: {time}',
                 'data: {data}'
-            ])
+            ]) + "\n"
         MB = 1024.0 * 1024.0
         for obj in iterable:
             data_time.update(time.time() - end)
@@ -258,7 +258,7 @@ class MetricLogger(object):
             end = time.time()
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-        print_func('{} Total time: {} ({:.4f} s / it)'.format(
+        print_func('\n{} Total time: {} ({:.4f} s / it)'.format(
             header, total_time_str, total_time / len(iterable)))
 
 

@@ -22,12 +22,12 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, max_norm: float = 0, 
                     wo_class_error=False, lr_scheduler=None, args=None, logger=None):
-    scaler = torch.cuda.amp.GradScaler(enabled=args.amp)
+    scaler = torch.amp.GradScaler("cuda", enabled=args.amp)
 
 
     model.train()
     criterion.train()
-    metric_logger = utils.MetricLogger(delimiter="  ")
+    metric_logger = utils.MetricLogger(delimiter="\n")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     if not wo_class_error:
         metric_logger.add_meter('class_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
@@ -43,7 +43,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         captions = [t["caption"] for t in targets]
         cap_list = [t["cap_list"] for t in targets]
         targets = [{k: v.to(device) for k, v in t.items() if torch.is_tensor(v)} for t in targets]
-        with torch.cuda.amp.autocast(enabled=args.amp):
+        with torch.amp.autocast("cuda", enabled=args.amp):
             outputs = model(samples, captions=captions)
             loss_dict = criterion(outputs, targets, cap_list, captions)
 
@@ -105,7 +105,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
-    print("Averaged stats:", metric_logger)
+    print("Averaged stats:", metric_logger, "\n", 16 * "---" + "\n")
     resstat = {k: meter.global_avg for k, meter in metric_logger.meters.items() if meter.count > 0}
     if getattr(criterion, 'loss_weight_decay', False):
         resstat.update({f'weight_{k}': v for k,v in criterion.weight_dict.items()})
@@ -118,7 +118,7 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
     model.eval()
     criterion.eval()
 
-    metric_logger = utils.MetricLogger(delimiter="  ")
+    metric_logger = utils.MetricLogger(delimiter="\n")
     if not wo_class_error:
         metric_logger.add_meter('class_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
     header = 'Test:'
@@ -165,7 +165,7 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
 
         bs = samples.tensors.shape[0]
         input_captions = [caption] * bs
-        with torch.cuda.amp.autocast(enabled=args.amp):
+        with torch.amp.autocast("cuda", enabled=args.amp):
 
             outputs = model(samples, captions=input_captions)
 
@@ -249,7 +249,7 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
-    print("Averaged stats:", metric_logger)
+    print("Averaged stats:", metric_logger, "\n", 16 * "---" + "\n")
     if coco_evaluator is not None:
         coco_evaluator.synchronize_between_processes()
     if panoptic_evaluator is not None:
