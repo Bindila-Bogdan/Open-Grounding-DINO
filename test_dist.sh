@@ -12,5 +12,5 @@ python -m torch.distributed.launch  --nproc_per_node=${GPU_NUM} main.py \
         --eval \
         -c ${CFG} \
         --datasets ${DATASETS}  \
-        --pretrain_model_path "./logs/checkpoint0002.pth" \
+        --pretrain_model_path "./weights/groundingdino_swint.pth" \
         --options text_encoder_type="bert-base-uncased"

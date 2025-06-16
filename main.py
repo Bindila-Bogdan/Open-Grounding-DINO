@@ -11,6 +11,7 @@ from pathlib import Path
 import os, sys
 import numpy as np
 import torch
+import shutil
 from torch.utils.data import DataLoader, DistributedSampler
 
 from util.get_param_dicts import get_param_dict
@@ -20,8 +21,8 @@ from util.utils import  BestMetricHolder
 import util.misc as utils
 
 import datasets
-from datasets import build_dataset, get_coco_api_from_dataset
-from engine import evaluate, train_one_epoch
+from datasets import build_dataset
+from engine import train_one_epoch
 
 from groundingdino.util.utils import clean_state_dict
 
@@ -213,9 +214,6 @@ def main(args):
     else:
         lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop)
 
-
-    base_ds = get_coco_api_from_dataset(dataset_val)
-
     if args.frozen_weights is not None:
         checkpoint = torch.load(args.frozen_weights, map_location='cpu', weights_only=False)
         model_without_ddp.detr.load_state_dict(clean_state_dict(checkpoint['model']),strict=False)
@@ -367,13 +365,17 @@ def main(args):
     # remove the copied files.
     copyfilelist = vars(args).get('copyfilelist')
     if copyfilelist and args.local_rank == 0:
-        from datasets.data_util import remove
         for filename in copyfilelist:
             print("Removing: {}".format(filename))
-            remove(filename)
+            if os.path.isdir(filename):
+                return shutil.rmtree(filename)
+            else:
+                return os.remove(filename)  
     
-    os.remove(f"{args.output_dir}/intermediate_evaluation.json")
-
+    try:
+        os.remove(f"{args.output_dir}/intermediate_evaluation.json")
+    except:
+        pass
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('DETR training and evaluation script', parents=[get_args_parser()])
