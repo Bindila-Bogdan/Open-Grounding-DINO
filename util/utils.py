@@ -11,21 +11,24 @@ def to_device(item, device):
     elif isinstance(item, dict):
         return {k: to_device(v, device) for k, v in item.items()}
     else:
-        raise NotImplementedError("Call Shilong if you use other containers! type: {}".format(type(item)))
+        raise NotImplementedError(
+            "Call Shilong if you use other containers! type: {}".format(type(item))
+        )
 
-class BestMetricSingle():
-    def __init__(self, init_res=0.0, better='large') -> None:
+
+class BestMetricSingle:
+    def __init__(self, init_res=0.0, better="large") -> None:
         self.init_res = init_res
         self.best_res = init_res
         self.best_ep = -1
 
         self.better = better
-        assert better in ['large', 'small']
+        assert better in ["large", "small"]
 
     def isbetter(self, new_res, old_res):
-        if self.better == 'large':
+        if self.better == "large":
             return new_res > old_res
-        if self.better == 'small':
+        if self.better == "small":
             return new_res < old_res
 
     def update(self, new_res, ep):
@@ -43,19 +46,18 @@ class BestMetricSingle():
 
     def summary(self) -> dict:
         return {
-            'best_res': self.best_res,
-            'best_ep': self.best_ep,
+            "best_res": self.best_res,
+            "best_ep": self.best_ep,
         }
 
 
-class BestMetricHolder():
-    def __init__(self, init_res=0.0, better='large', use_ema=False) -> None:
+class BestMetricHolder:
+    def __init__(self, init_res=0.0, better="large", use_ema=False) -> None:
         self.best_all = BestMetricSingle(init_res, better)
         self.use_ema = use_ema
         if use_ema:
             self.best_ema = BestMetricSingle(init_res, better)
             self.best_regular = BestMetricSingle(init_res, better)
-    
 
     def update(self, new_res, epoch, is_ema=False):
         """
@@ -76,9 +78,9 @@ class BestMetricHolder():
             return self.best_all.summary()
 
         res = {}
-        res.update({f'all_{k}':v for k,v in self.best_all.summary().items()})
-        res.update({f'regular_{k}':v for k,v in self.best_regular.summary().items()})
-        res.update({f'ema_{k}':v for k,v in self.best_ema.summary().items()})
+        res.update({f"all_{k}": v for k, v in self.best_all.summary().items()})
+        res.update({f"regular_{k}": v for k, v in self.best_regular.summary().items()})
+        res.update({f"ema_{k}": v for k, v in self.best_ema.summary().items()})
         return res
 
     def __repr__(self) -> str:
@@ -86,4 +88,3 @@ class BestMetricHolder():
 
     def __str__(self) -> str:
         return self.__repr__()
-            

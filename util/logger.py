@@ -8,9 +8,7 @@ import colorlog
 
 # so that calling setup_logger multiple times won't add many handlers
 @functools.lru_cache()
-def setup_logger(
-    output=None, distributed_rank=0, *, color=True, name="imagenet", abbrev_name=None
-):
+def setup_logger(output=None, distributed_rank=0, *, color=True, name="imagenet", abbrev_name=None):
     """
     Initialize the detectron2 logger and set its verbosity level to "INFO".
 
@@ -26,16 +24,16 @@ def setup_logger(
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
     formatter = colorlog.ColoredFormatter(
-            "%(log_color)s%(levelname)-8s%(reset)s %(log_color)s%(asctime)s | %(blue)s%(message)s",
+        "%(log_color)s%(levelname)-8s%(reset)s %(log_color)s%(asctime)s | %(blue)s%(message)s",
         datefmt=None,
         reset=True,
         log_colors={
-            'DEBUG':    'cyan', 
-            'INFO':     'green',
-            'WARNING':  'yellow',
-            'ERROR':    'red',
-            'CRITICAL': 'red,bg_white'
-        }
+            "DEBUG": "cyan",
+            "INFO": "green",
+            "WARNING": "yellow",
+            "ERROR": "red",
+            "CRITICAL": "red,bg_white",
+        },
     )
     logger.propagate = False
 

@@ -150,9 +150,7 @@ def _reduction_op_flop_jit(inputs, outputs, reduce_flops=1, finalize_flops=0):
     in_elements = prod(input_shapes[0])
     out_elements = prod(output_shapes[0])
 
-    num_flops = in_elements * reduce_flops + out_elements * (
-        finalize_flops - reduce_flops
-    )
+    num_flops = in_elements * reduce_flops + out_elements * (finalize_flops - reduce_flops)
 
     return num_flops
 
@@ -181,9 +179,7 @@ def conv_flop_count(
     return flop_counter
 
 
-def conv_flop_jit(
-    inputs: typing.List[object], outputs: typing.List[object]
-) -> typing.Counter[str]:
+def conv_flop_jit(inputs: typing.List[object], outputs: typing.List[object]) -> typing.Counter[str]:
     """
     This method counts the flops for convolution using torch script.
     Args:

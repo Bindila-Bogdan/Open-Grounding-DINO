@@ -20,6 +20,7 @@ def clean_state_dict(state_dict):
         new_state_dict[k] = v
     return new_state_dict
 
+
 def to_device(item, device):
     if isinstance(item, torch.Tensor):
         return item.to(device)
@@ -31,6 +32,7 @@ def to_device(item, device):
         raise NotImplementedError(
             "Call Shilong if you use other containers! type: {}".format(type(item))
         )
+
 
 def inverse_sigmoid(x, eps=1e-5):
     x = x.clamp(min=0, max=1)
@@ -112,12 +114,17 @@ class BestMetricHolder:
     def __str__(self) -> str:
         return self.__repr__()
 
+
 def get_phrases_from_posmap(
-    posmap: torch.BoolTensor, tokenized: Dict, tokenizer: AutoTokenizer, left_idx: int = 0, right_idx: int = 255
+    posmap: torch.BoolTensor,
+    tokenized: Dict,
+    tokenizer: AutoTokenizer,
+    left_idx: int = 0,
+    right_idx: int = 255,
 ):
     assert isinstance(posmap, torch.Tensor), "posmap must be torch.Tensor"
     if posmap.dim() == 1:
-        posmap[0: left_idx + 1] = False
+        posmap[0 : left_idx + 1] = False
         posmap[right_idx:] = False
         non_zero_idx = posmap.nonzero(as_tuple=True)[0].tolist()
         token_ids = [tokenized["input_ids"][i] for i in non_zero_idx]
