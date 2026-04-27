@@ -1,39 +1,58 @@
-# Adapted Open Grounding DINO
+# Open GroundingDINO RichArt Fine-Tuning
 
-This repository is a fork of Open GroundingDINO adapted to support fine-tuning with referring expressions
-and detailed object descriptions, with the RichArt dataset as a primary target. The goal of this fork is
-to enable research and experiments where object instances are described by natural-language references
-or long-form descriptions rather than short category labels.
+This is a fork of [Open GroundingDINO](https://github.com/longzw1997/Open-GroundingDino) adapted for fine-tuning on the [RichArt dataset](https://huggingface.co/datasets/MihaiBogdanBindila/RichArt), as part of the paper [Fine-Grained Cross-Modal Retrieval in Art via Region-Level Grounding of Symbolic Narratives](https://github.com/Bindila-Bogdan/Fine-Grained-Cross-Modal-Retrieval-in-Art).
 
-What this fork adds and improves
+This repository focuses exclusively on the fine-tuning pipeline; the MARGE-GD model extensions live in the main paper repository.
 
-- Dataset support: utilities and example conversion scripts to transform RichArt-style annotations into
-	the training format expected by GroundingDINO. See the `datasets/` folder for dataset loaders and
-	format helpers.
-- Fine-tuning flow: scripts and helpers to run single-node and distributed fine-tuning, including
-	`train_dist.sh` and `test_dist.sh`, example training/validation files in `data/`, and a notebook that
-	demonstrates preparing data and running a fine-tuning job.
-- Evaluation tooling: an evaluation pipeline that computes detection and retrieval metrics (mAP and
-	related scores) for reference-based tasks, integrated into the training loop and available as a
-	standalone script in `tools/`.
-- Inference and usability fixes: updates to inference utilities to handle richer textual inputs, along
-	with runtime fixes and more robust logging to make experimentation easier and reproducible.
-- Native ops and build compatibility: adjustments to the native ms_deform_attn implementation and build
-	scripts to address newer CUDA toolchains and reduce friction when compiling custom extensions.
-- Examples and reproducibility: example notebooks, sample annotation files, and a streamlined setup
-	script that helps reproduce training and evaluation runs locally or on multi-GPU instances.
+## Changes from upstream
 
-Why this matters for referring-expression tasks
+- **Evaluation replaced** — upstream COCO evaluation removed entirely; [`util/evaluate.py`](util/evaluate.py) implements mAP@50 and mAP@50-95 against RichArt-style JSONL annotations. It is called as a subprocess after each training epoch and also supports direct invocation.
+- **Training loop** — [`main.py`](main.py) reads per-epoch evaluation results from `intermediate_evaluation.json` for best-checkpoint tracking; epoch logs are written to a cumulative `logs.json` instead of the upstream `log.txt`.
+- **COCO/OD infrastructure removed** — all COCO dataset loaders, panoptic eval, tools (`coco2odvg.py`, `inference_on_a_image.py`, etc.), slurm scripts, and COCO configs are removed; the fork is VG-only.
+- **Dataset loader** — [`datasets/odvg.py`](datasets/odvg.py) is unchanged in behaviour; example RichArt-format annotation files are provided in [`data/train/`](data/train/) and [`data/val/`](data/val/).
+- **Config** — [`config/cfg_odvg.py`](config/cfg_odvg.py) holds training hyperparameters. [`train_dist.sh`](train_dist.sh) and [`test_dist.sh`](test_dist.sh) hard-code `./weights/groundingdino_swint.pth` and `bert-base-uncased`.
+- **PyTorch 2.x compatibility** — `engine.py` moved from the repo root to [`util/engine.py`](util/engine.py); `torch.cuda.amp.autocast` replaced with `torch.amp.autocast("cuda", ...)` in both [`util/engine.py`](util/engine.py) and [`models/GroundingDINO/transformer.py`](models/GroundingDINO/transformer.py); `use_reentrant=False` added to `checkpoint.checkpoint()` calls in the transformer.
+- **Dependencies** — [`requirements.txt`](requirements.txt) removes `torch`/`torchvision`/`jsonlines` and adds `torchmetrics`.
+- **Embedding extraction** — the fine-tuned weights produced here are loaded by the sibling `GroundingDINO/` codebase (see [Directory layout](#directory-layout)), which has been extended with extraction logic: visual embeddings from the final Cross-modality Decoder layer and textual embeddings from the Feature Enhancer, followed by average pooling and L2 normalization.
+- **Note** — [`training_example.ipynb`](training_example.ipynb) is an unmodified upstream notebook using the Aquarium dataset; it was not used in this work.
 
-Grounding tasks that use rich textual descriptions require careful dataset formatting, flexible text
-tokenization, and evaluation that accounts for language-conditioned localization. This fork brings
-together practical additions — dataset loaders, training/evaluation scripts, and inference improvements —
-so you can focus on modeling and experiments rather than engineering scaffolding.
+## Directory layout
 
-Next steps and suggestions
+[`setup.sh`](setup.sh) expects the following sibling directory layout:
 
-- To reproduce a fine-tuning run: follow the example notebook `training_example.ipynb` and run
-	`setup.sh` to install dependencies, then use `train_dist.sh` to start training.
-- If you want, I can expand this README with a step-by-step tutorial, a CHANGELOG summarizing the
-	development history, or a `CONTRIBUTING.md` describing how to run experiments on RichArt.
+```
+parent/
+├── GroundingDINO/        # IDEA-Research GroundingDINO, extended with embedding extraction code
+└── Open-Grounding-DINO/  # this repository
+```
 
+## Setup
+
+```bash
+bash setup.sh
+```
+
+The script will:
+1. Build and install GroundingDINO from `../GroundingDINO/`.
+2. Create an `open_grounding_dino` conda environment (Python 3.12.3). Note: `conda activate` inside a shell script requires `conda init` to have been run in the shell first.
+3. Install dependencies from [`requirements.txt`](requirements.txt).
+4. Build and test the deformable attention extension in [`models/GroundingDINO/ops/`](models/GroundingDINO/ops/).
+
+## Usage
+
+### Fine-tuning
+
+```bash
+bash train_dist.sh <NUM_GPUS> <CONFIG> <DATASETS_JSON> <OUTPUT_DIR>
+
+# example
+bash train_dist.sh 1 config/cfg_odvg.py config/datasets_vg_test.json ./output
+```
+
+Expects a pretrained checkpoint at `./weights/groundingdino_swint.pth`.
+
+### Evaluation
+
+```bash
+bash test_dist.sh <NUM_GPUS> <CONFIG> <DATASETS_JSON> <OUTPUT_DIR>
+```
