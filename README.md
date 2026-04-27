@@ -14,7 +14,7 @@ This repository focuses exclusively on the fine-tuning pipeline; the MARGE-GD mo
 - **PyTorch 2.x compatibility** — `engine.py` moved from the repo root to [`util/engine.py`](util/engine.py); `torch.cuda.amp.autocast` replaced with `torch.amp.autocast("cuda", ...)` in both [`util/engine.py`](util/engine.py) and [`models/GroundingDINO/transformer.py`](models/GroundingDINO/transformer.py); `use_reentrant=False` added to `checkpoint.checkpoint()` calls in the transformer.
 - **Dependencies** — [`requirements.txt`](requirements.txt) removes `torch`/`torchvision`/`jsonlines` and adds `torchmetrics`.
 - **Embedding extraction** — the fine-tuned weights produced here are loaded by the sibling `GroundingDINO/` codebase (see [Directory layout](#directory-layout)), which has been extended with extraction logic: visual embeddings from the final Cross-modality Decoder layer and textual embeddings from the Feature Enhancer, followed by average pooling and L2 normalization.
-- **Note** — [`training_example.ipynb`](training_example.ipynb) is an unmodified upstream notebook using the Aquarium dataset; it was not used in this work.
+- **Note** — [`training_example.ipynb`](training_example.ipynb) is an unmodified upstream notebook using the Aquarium dataset; it was used only for testing purposes.
 
 ## Directory layout
 
